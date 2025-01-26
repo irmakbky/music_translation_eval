@@ -88,8 +88,8 @@ def eval_midi(reference_midi, generated_midi, metric="precision_recall_f1_overla
     ref_intervals = np.array(ref_intervals)
     ref_pitches = np.array(ref_pitches)
 
-    est_intervals = ref_intervals[wp[::-1].T[1]]
-    est_pitches = ref_pitches[wp[::-1].T[1]]
+    est_intervals = ref_intervals[wp[::-1].T[0]]
+    est_pitches = ref_pitches[wp[::-1].T[0]]
 
     if metric == "precision_recall_f1_overlap":
         precision, recall, f_measure, avg_overlap_ratio = precision_recall_f1_overlap(ref_intervals, ref_pitches, est_intervals, est_pitches)
