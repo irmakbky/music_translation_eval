@@ -1,0 +1,2 @@
+/opt/asap-dataset/Bach/Fugue/bwv_848/Denisova06M.wav
+/opt/asap-dataset/Bach/Fugue/bwv_848/Lee01M.wav
