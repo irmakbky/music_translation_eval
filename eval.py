@@ -88,8 +88,20 @@ def eval_midi(reference_midi, generated_midi, metric="precision_recall_f1_overla
     ref_intervals = np.array(ref_intervals)
     ref_pitches = np.array(ref_pitches)
 
-    est_intervals = ref_intervals[wp[::-1].T[0]]
-    est_pitches = ref_pitches[wp[::-1].T[0]]
+
+    midi_data = pretty_midi.PrettyMIDI(generated_midi)
+    est_intervals, est_pitches = [], []
+    for instrument in midi_data.instruments:
+        for note in instrument.notes:
+            est_intervals.append((note.start, note.end))
+            est_pitches.append(note.pitch)
+    est_intervals = np.array(est_intervals)
+    est_pitches = np.array(est_pitches)
+    
+    ref_intervals = ref_intervals[wp[::-1].T[0]]
+    ref_pitches = ref_pitches[wp[::-1].T[0]]
+    est_intervals = est_intervals[wp[::-1].T[1]]
+    est_pitches = est_pitches[wp[::-1].T[1]]
 
     if metric == "precision_recall_f1_overlap":
         precision, recall, f_measure, avg_overlap_ratio = precision_recall_f1_overlap(ref_intervals, ref_pitches, est_intervals, est_pitches)
