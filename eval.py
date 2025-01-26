@@ -34,19 +34,8 @@ def align_midi_with_dtw(midi_file_1, midi_file_2):
     notes_1 = extract_notes(midi_file_1)
     notes_2 = extract_notes(midi_file_2)
     
-    time_1 = notes_1[:, 0]
-    pitch_1 = notes_1[:, 1]
-    
-    time_2 = notes_2[:, 0]
-    pitch_2 = notes_2[:, 1]
-    
-    # Convert time-pitch sequences into 2D feature matrices
-    # Feature vector: [time, pitch]
-    features_1 = np.vstack((time_1, pitch_1))
-    features_2 = np.vstack((time_2, pitch_2))
-
     # Perform DTW using librosa
-    D, wp = librosa.sequence.dtw(X=features_1, Y=features_2)
+    D, wp = librosa.sequence.dtw(X=notes_1[:, 1], Y=notes_2[:, 1])
     
     return D, wp
     
@@ -88,7 +77,6 @@ def eval_midi(reference_midi, generated_midi, metric="precision_recall_f1_overla
     ref_intervals = np.array(ref_intervals)
     ref_pitches = np.array(ref_pitches)
 
-
     midi_data = pretty_midi.PrettyMIDI(generated_midi)
     est_intervals, est_pitches = [], []
     for instrument in midi_data.instruments:
@@ -97,10 +85,8 @@ def eval_midi(reference_midi, generated_midi, metric="precision_recall_f1_overla
             est_pitches.append(note.pitch)
     est_intervals = np.array(est_intervals)
     est_pitches = np.array(est_pitches)
-    
-    ref_intervals = ref_intervals[wp[::-1].T[0]]
-    ref_pitches = ref_pitches[wp[::-1].T[0]]
-    est_intervals = est_intervals[wp[::-1].T[1]]
+
+    est_intervals = ref_intervals[wp[::-1].T[0]]
     est_pitches = est_pitches[wp[::-1].T[1]]
 
     if metric == "precision_recall_f1_overlap":
