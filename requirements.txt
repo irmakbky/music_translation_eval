@@ -3,3 +3,4 @@ librosa==0.10.1
 pretty_midi==0.2.10
 music21==5.7.2
 mir_eval==0.7
+scipy==1.11.1

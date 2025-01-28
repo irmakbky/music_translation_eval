@@ -1,4 +1,5 @@
 import os
+import scipy
 import librosa
 import librosa.display
 import pretty_midi
@@ -48,25 +49,30 @@ def audio_to_midi(data_folder_path, audio_files_list):
         audio_files_list: audio file paths, e.g. Bach/Fugue/bwv_848/Denisova06M.wav (so full path becomes data_folder_path/audio_file_path)
     """
     # Create file list for docker
-    transcribed_midi_files = []
+    transcribed_midi_files, onf_score_files = [], []
     datafolder = os.path.basename(data_folder_path)
     with open("file_list.txt", "w") as file:
         for audio in audio_files_list:
             file.write(f'/opt/{datafolder}/{audio}\n')
             transcribed_midi_files.append(f'/{os.getcwd()}/midi/{datafolder}/{audio}.midi')
+            onf_score_files.append(f'/{os.getcwd()}/onf_score/{datafolder}/{audio[:-4]}_preds.npy')
 
     # Transcribe
     os.makedirs('midi', exist_ok=True)
+    os.makedirs('onf_score', exist_ok=True)
     subprocess.run(['docker', 'build', '-t', 'onf', '.'], check=True)
-    subprocess.run(['docker', 'run', '-v', f'{os.getcwd()}/midi:/opt/midi', '-v', f'{data_folder_path}:/opt/{datafolder}', '-t', 'onf'], check=True)
+    subprocess.run(['docker', 'run', '-v', f'{os.getcwd()}/midi:/opt/midi', '-v', f'{data_folder_path}:/opt/{datafolder}', '-v', f'{os.getcwd()}/onf_score:/opt/onf_score', '-t', 'onf'], check=True)
 
-    return transcribed_midi_files
+    return transcribed_midi_files, onf_score_files
 
-    # Transcriptions will be written inside midi/ folder
+    # Transcriptions will be written inside midi/ folder, O&F predictions will be written in onf_score/ folder 
 
-def eval_midi(reference_midi, generated_midi, metric="precision_recall_f1_overlap"):
+def eval_midi(reference_midi, generated_midi, reference_frames, generated_frames, metric="precision_recall_f1_overlap"):
 
-    D, wp = align_midi_with_dtw(reference_midi, generated_midi)
+    D, wp = librosa.sequence.dtw(reference_frames, generated_frames)
+    seen = set()
+    new_wp = np.array([(a, b) for a, b in wp[::-1] if b not in seen and not seen.add(b)])
+    interp_func = scipy.interpolate.interp1d(new_wp[:, 1], new_wp[:, 0], kind='linear', fill_value="extrapolate")
 
     midi_data = pretty_midi.PrettyMIDI(reference_midi)
     ref_intervals, ref_pitches = [], []
@@ -77,17 +83,19 @@ def eval_midi(reference_midi, generated_midi, metric="precision_recall_f1_overla
     ref_intervals = np.array(ref_intervals)
     ref_pitches = np.array(ref_pitches)
 
+    frame_rate = 16000/512
     midi_data = pretty_midi.PrettyMIDI(generated_midi)
     est_intervals, est_pitches = [], []
     for instrument in midi_data.instruments:
         for note in instrument.notes:
-            est_intervals.append((note.start, note.end))
+            start = interp_func(note.start * frame_rate).item() / frame_rate
+            end = interp_func(note.end * frame_rate).item() / frame_rate
+            if start == end: # if interpolation causes start and end to be the same due to short duration
+                end += 1e-9
+            est_intervals.append((start, end))
             est_pitches.append(note.pitch)
     est_intervals = np.array(est_intervals)
     est_pitches = np.array(est_pitches)
-
-    est_intervals = ref_intervals[wp[::-1].T[0]]
-    est_pitches = est_pitches[wp[::-1].T[1]]
 
     if metric == "precision_recall_f1_overlap":
         precision, recall, f_measure, avg_overlap_ratio = precision_recall_f1_overlap(ref_intervals, ref_pitches, est_intervals, est_pitches)
@@ -105,10 +113,14 @@ def eval_midi(reference_midi, generated_midi, metric="precision_recall_f1_overla
 
 def eval_audio(data_folder_path, reference_audio, generated_audio, metric="precision_recall_f1_overlap"):
 
-    midifiles = audio_to_midi(data_folder_path, [reference_audio, generated_audio])
+    midifiles, onf_score_files = audio_to_midi(data_folder_path, [reference_audio, generated_audio])
     
     reference_midi = midifiles[0]
     generated_midi = midifiles[1]
 
-    return eval_midi(reference_midi, generated_midi, metric=metric)    
+    # get frame predictions
+    reference_frames = np.load(onf_score_files[0], allow_pickle=True)[0]['frame_predictions'][0].T
+    generated_frames = np.load(onf_score_files[1], allow_pickle=True)[0]['frame_predictions'][0].T
+
+    return eval_midi(reference_midi, generated_midi, reference_frames, generated_frames, metric=metric)    
     

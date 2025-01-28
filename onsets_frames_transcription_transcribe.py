@@ -136,9 +136,10 @@ def run(argv, config_map, data_fn):
                 input_fn,
                 checkpoint_path=checkpoint_path,
                 yield_single_examples=False))
-        # np.save(f'/opt/{filename[5:-4]}_preds', prediction_list)
-        # print(f'Saved file to /opt/{filename[5:-4]}_preds.npy')
-        # assert len(prediction_list) == 1
+        os.makedirs(os.path.dirname(f'/opt/onf_score/{filename[5:-4]}_preds.npy'), exist_ok=True)
+        np.save(f'/opt/onf_score/{filename[5:-4]}_preds', prediction_list)
+        print(f'Saved file to /opt/onf_score/{filename[5:-4]}_preds.npy')
+        assert len(prediction_list) == 1
 
         sequence_prediction = music_pb2.NoteSequence.FromString(
             prediction_list[0]['sequence_predictions'][0])
