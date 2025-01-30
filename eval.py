@@ -53,6 +53,7 @@ def audio_to_midi(data_folder_path, audio_files_list):
     datafolder = os.path.basename(data_folder_path)
     with open("file_list.txt", "w") as file:
         for audio in audio_files_list:
+            
             file.write(f'/opt/{datafolder}/{audio}\n')
             transcribed_midi_files.append(f'/{os.getcwd()}/midi/{datafolder}/{audio}.midi')
             onf_score_files.append(f'/{os.getcwd()}/onf_score/{datafolder}/{audio[:-4]}_preds.npy')
@@ -67,7 +68,11 @@ def audio_to_midi(data_folder_path, audio_files_list):
 
     # Transcriptions will be written inside midi/ folder, O&F predictions will be written in onf_score/ folder 
 
-def eval_midi(reference_midi, generated_midi, reference_frames, generated_frames, metric="precision_recall_f1_overlap"):
+def eval_midi_with_frames(reference_midi, generated_midi, reference_onf, generated_onf, metric="precision_recall_f1_overlap"):
+    
+    # get frame predictions
+    reference_frames = np.load(reference_onf, allow_pickle=True)[0]['frame_predictions'][0].T
+    generated_frames = np.load(generated_onf, allow_pickle=True)[0]['frame_predictions'][0].T
 
     D, wp = librosa.sequence.dtw(reference_frames, generated_frames)
     seen = set()
@@ -111,6 +116,64 @@ def eval_midi(reference_midi, generated_midi, reference_frames, generated_frames
     return precision, recall, f_measure, avg_overlap_ratio
 
 
+def eval_midi(reference_midi, generated_midi, metric="precision_recall_f1_overlap"):
+
+    midi_data = pretty_midi.PrettyMIDI(reference_midi)
+    ref_intervals, ref_pitches = [], []
+    for instrument in midi_data.instruments:
+        for note in instrument.notes:
+            ref_intervals.append((note.start, note.end))
+            ref_pitches.append(note.pitch)
+    ref_intervals = np.array(ref_intervals)
+    ref_pitches = np.array(ref_pitches)
+
+    midi_data2 = pretty_midi.PrettyMIDI(generated_midi)
+    pred_intervals, pred_pitches = [], []
+    for instrument in midi_data2.instruments:
+        for note in instrument.notes:
+            pred_intervals.append((note.start, note.end))
+            pred_pitches.append(note.pitch)
+    pred_intervals = np.array(pred_intervals)
+    pred_pitches = np.array(pred_pitches)
+
+    frame_rate = 16000 / 512
+    
+    ref_arr = np.zeros((128, int(ref_intervals[-1][1]*frame_rate)))
+    for (onset, offset), pitch in zip(ref_intervals, ref_pitches):
+        ref_arr[pitch, int(onset*frame_rate):int(offset*frame_rate)] = 1
+    pred_arr = np.zeros((128, int(pred_intervals[-1][1]*frame_rate)))
+    for (onset, offset), pitch in zip(pred_intervals, pred_pitches):
+        pred_arr[pitch, int(onset*frame_rate):int(offset*frame_rate)] = 1
+
+    D, wp = librosa.sequence.dtw(ref_arr, pred_arr)
+    seen = set()
+    new_wp = np.array([(a, b) for a, b in wp[::-1] if b not in seen and not seen.add(b)])
+    interp_func = scipy.interpolate.interp1d(new_wp[:, 1], new_wp[:, 0], kind='linear', fill_value="extrapolate")   
+
+    est_intervals = []
+    est_pitches = pred_pitches
+    for start, end in pred_intervals:
+        start = interp_func(start * frame_rate).item() / frame_rate
+        end = interp_func(end * frame_rate).item() / frame_rate
+        if start == end: # if interpolation causes start and end to be the same due to short duration
+            end += 1e-9
+        est_intervals.append((start, end))
+    est_intervals = np.array(est_intervals)
+
+    if metric == "precision_recall_f1_overlap":
+        precision, recall, f_measure, avg_overlap_ratio = precision_recall_f1_overlap(ref_intervals, ref_pitches, est_intervals, est_pitches)
+    elif metric == "onset_precision_recall_f1":
+        precision, recall, f_measure = onset_precision_recall_f1(ref_intervals, est_intervals)
+        avg_overlap_ratio = None
+    elif metric == "offset_precision_recall_f1":
+        precision, recall, f_measure = offset_precision_recall_f1(ref_intervals, est_intervals)
+        avg_overlap_ratio = None
+    else:
+        raise NotImplementedError(f"{metric} is not a valid metric.")
+    
+    return precision, recall, f_measure, avg_overlap_ratio
+
+
 def eval_audio(data_folder_path, reference_audio, generated_audio, metric="precision_recall_f1_overlap"):
 
     midifiles, onf_score_files = audio_to_midi(data_folder_path, [reference_audio, generated_audio])
@@ -118,9 +181,9 @@ def eval_audio(data_folder_path, reference_audio, generated_audio, metric="preci
     reference_midi = midifiles[0]
     generated_midi = midifiles[1]
 
-    # get frame predictions
-    reference_frames = np.load(onf_score_files[0], allow_pickle=True)[0]['frame_predictions'][0].T
-    generated_frames = np.load(onf_score_files[1], allow_pickle=True)[0]['frame_predictions'][0].T
+    reference_onf, generated_onf = onf_score_files[0], onf_score_files[1]
 
-    return eval_midi(reference_midi, generated_midi, reference_frames, generated_frames, metric=metric)    
+    # not using frames for now
+    # return eval_midi(reference_midi, generated_midi, reference_onf, generated_onf, metric=metric)    
+    return eval_midi(reference_midi, generated_midi, metric=metric)    
     
